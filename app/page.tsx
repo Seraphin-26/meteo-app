@@ -1,65 +1,106 @@
-import Image from "next/image";
+// app/page.tsx — Server Component (Next.js 14+ App Router)
+//
+// Version complète : SSR du thème + pré-fetch météo + compatible Next.js 15
+//
+// Règle clé Next.js 15 :
+//   → searchParams est une Promise  → await obligatoire
+//   → On ne peut PAS passer de fonctions ou d'objets avec méthodes
+//     (ex: icônes Lucide) d'un Server Component vers un Client Component
+//   → Solution : on extrait uniquement les strings/boolean du thème
+//     et on laisse WeatherShell reconstruire le WeatherTheme côté client
 
-export default function Home() {
+import WeatherShell from "@/components/WeatherShell";
+import { getWeatherTheme } from "@/lib/weatherUtils";
+import { WeatherData } from "@/types/weather";
+
+const DEFAULT_CITY = "Paris";
+const API_KEY = process.env.OPENWEATHER_API_KEY ?? "";
+
+// ── Fetch météo côté serveur ───────────────────────────────────────────────────
+
+async function getWeather(city: string): Promise<WeatherData | null> {
+  if (!API_KEY) return null;
+  try {
+    const res = await fetch(
+      `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric&lang=fr`,
+      { next: { revalidate: 600 } }
+    );
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// Données de démo si pas de clé API
+const MOCK_DATA: WeatherData = {
+  coord: { lon: 2.3488, lat: 48.8534 },
+  weather: [{ id: 800, main: "Clear", description: "ciel dégagé", icon: "01d" }],
+  base: "stations",
+  main: { temp: 22, feels_like: 21, temp_min: 18, temp_max: 25, pressure: 1018, humidity: 45 },
+  visibility: 10000,
+  wind: { speed: 3.5, deg: 180 },
+  clouds: { all: 0 },
+  dt: Math.floor(Date.now() / 1000),
+  sys: {
+    country: "FR",
+    sunrise: Math.floor(Date.now() / 1000) - 3600 * 4,
+    sunset: Math.floor(Date.now() / 1000) + 3600 * 4,
+  },
+  timezone: 3600,
+  id: 2988507,
+  name: "Paris",
+  cod: 200,
+};
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default async function WeatherPage({
+  searchParams,
+}: {
+  // ✅ Next.js 15 : searchParams est une Promise
+  searchParams: Promise<{ city?: string }>;
+}) {
+  // ✅ await obligatoire
+  const { city } = await searchParams;
+  const targetCity = city ?? DEFAULT_CITY;
+
+  // Pré-fetch côté serveur pour le thème initial (évite le flash de couleur)
+  const weather = (await getWeather(targetCity)) ?? MOCK_DATA;
+  const conditionId = weather.weather[0]?.id ?? 800;
+
+  // On calcule le thème côté serveur...
+  const theme = getWeatherTheme(conditionId);
+
+  // ...mais on n'envoie que des STRINGS au Client Component (pas l'icône Lucide !)
+  // WeatherShell reconstituera le WeatherTheme complet côté client.
+  const themeProps = {
+    initialGradient:    theme.gradient,
+    initialBlobTop:     theme.blobTopColor,
+    initialBlobBottom:  theme.blobBottomColor,
+    initialAdvice:      theme.advice,
+    initialIconName:    theme.label, // label string, l'icône est résolue côté client
+    initialLabel:       theme.label,
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <>
+      {/* Police chargée côté serveur → zéro FOUT (Flash Of Unstyled Text) */}
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap"
+      />
+
+      {/*
+        WeatherShell reçoit uniquement des valeurs sérialisables (strings, boolean).
+        Il reconstruit le WeatherTheme complet côté client et coordonne :
+          - WeatherBackground : fond animé avec les bonnes couleurs dès le 1er rendu
+          - WeatherCard       : géolocalisation + recherche + carte météo
+      */}
+      <WeatherShell
+        {...themeProps}
+        isDemo={!API_KEY}
+      />
+    </>
   );
 }
